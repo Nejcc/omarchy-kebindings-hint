@@ -166,8 +166,8 @@ rm -f ~/.local/state/nejcc.keybindings-hint.learned.json ~/.local/state/nejcc.ke
 ## Tests
 
 ```sh
-node --test tests/     # unit tests for the logic, no dependencies (also run in CI)
-tests/smoke.sh         # live test against your running Omarchy shell
+node --test tests/*.test.mjs   # unit tests for the logic, no dependencies (also run in CI)
+tests/smoke.sh                 # live test against your running Omarchy shell
 ```
 
 The unit tests cover parsing, grouping, suggestions and learning, including

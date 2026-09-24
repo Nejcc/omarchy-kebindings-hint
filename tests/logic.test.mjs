@@ -1,4 +1,4 @@
-// Unit tests for Logic.js. Run with: node --test tests/
+// Unit tests for Logic.js. Run with: node --test tests/*.test.mjs
 // Logic.js is a QML JavaScript library, so it's loaded into a sandbox with its
 // `.pragma library` line stripped. No dependencies needed.
 import { test } from "node:test"
