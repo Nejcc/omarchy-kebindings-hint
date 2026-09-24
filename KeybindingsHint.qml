@@ -5,18 +5,30 @@ import QtQuick
 import qs.Commons
 
 // A which-key style bar: lists every SUPER + key binding along the bottom of the
-// screen. It never takes the keyboard, so pressing a key while it shows still
-// runs that binding.
+// screen, grouped by what it does. It never takes the keyboard, so pressing a
+// key while it shows still runs that binding.
 Item {
   id: root
 
   property var shell: null
   property var manifest: null
   property bool opened: false
-  property var hints: []   // [{ key, desc }]
+  property var groups: []   // [{ title, items: [{ key, desc }] }]
+  property int count: 0
 
   // Safety net: a release bind can be missed, so the bar never stays up for long.
   readonly property int autoHideMs: 6000
+
+  readonly property color accent: Color.menu.selectedText
+  readonly property color text: Color.menu.text
+  readonly property color muted: Qt.rgba(text.r, text.g, text.b, 0.55)
+  readonly property color keyFill: Qt.rgba(accent.r, accent.g, accent.b, 0.12)
+  readonly property color keyEdge: Qt.rgba(accent.r, accent.g, accent.b, 0.35)
+  readonly property int pad: Style.spacing.panelPadding
+  readonly property int slide: Style.space(14)
+  // Groups longer than this wrap into another column, so the bar stays short.
+  readonly property int maxRows: 6
+  readonly property int totalColumns: groups.reduce(function(n, g) { return n + g.columns }, 0)
 
   function open(payloadJson) {
     root.opened = true
@@ -51,20 +63,38 @@ Item {
     return key.split(" / ").map(function(k) { return root.symbols[k] || k }).join(" ")
   }
 
+  // First match wins; anything unmatched lands in "Other".
+  // ponytail: grouped by words in the description; Omarchy's list has no categories.
+  readonly property var groupRules: [
+    { title: "Workspaces",   test: /workspace|scratchpad/i },
+    { title: "Focus",        test: /^focus|last window|jump to window/i },
+    { title: "Windows",      test: /window|full ?screen|split|group|float|pseudo|expand|shrink/i },
+    { title: "Clipboard",    test: /copy|paste|cut\b|select all/i },
+    { title: "Apps & menus", test: /menu|terminal|keybindings|browser|file manager|picker|launch/i }
+  ]
+
   // Parses `omarchy menu keybindings --print` lines: "SUPER + J    → Toggle window split".
   function parse(text) {
-    var out = [], workspaces = false
+    var buckets = {}, order = root.groupRules.map(function(r) { return r.title }).concat(["Other"])
+    order.forEach(function(t) { buckets[t] = [] })
+    var workspaces = false, total = 0
     text.split("\n").forEach(function(line) {
       var m = line.match(/^SUPER \+ (.+?)\s+→\s+(.+)$/)
       if (!m || /MOUSE|mouse_/.test(m[1])) return
+      var item = { key: root.label(m[1].replace(/SUPER \+ /g, "")), desc: m[2] }
       if (/^[0-9]$/.test(m[1]) && /workspace/i.test(m[2])) {
-        if (!workspaces) out.push({ key: "1 … 0", desc: "Switch to workspace" })
+        if (workspaces) return
         workspaces = true
-        return
+        item = { key: "1–0", desc: "Switch to workspace" }
       }
-      out.push({ key: root.label(m[1].replace(/SUPER \+ /g, "")), desc: m[2] })
+      var rule = root.groupRules.find(function(r) { return r.test.test(item.desc) })
+      buckets[rule ? rule.title : "Other"].push(item)
+      total++
     })
-    return out
+    root.count = total
+    root.groups = order
+      .filter(function(t) { return buckets[t].length > 0 })
+      .map(function(t) { return { title: t, items: buckets[t], columns: Math.ceil(buckets[t].length / root.maxRows) } })
   }
 
   Component.onCompleted: list.running = true
@@ -72,7 +102,7 @@ Item {
   Process {
     id: list
     command: ["omarchy", "menu", "keybindings", "--print"]
-    stdout: StdioCollector { onStreamFinished: root.hints = root.parse(text) }
+    stdout: StdioCollector { onStreamFinished: root.parse(text) }
   }
 
   Timer {
@@ -83,10 +113,11 @@ Item {
 
   PanelWindow {
     id: panel
-    visible: root.opened
+    // Stay mapped until the fade-out finishes.
+    visible: root.opened || card.opacity > 0
     anchors { bottom: true; left: true; right: true }
     margins { bottom: Style.gapsOut; left: Style.gapsOut; right: Style.gapsOut }
-    implicitHeight: card.implicitHeight
+    implicitHeight: card.implicitHeight + root.slide
     color: "transparent"
     WlrLayershell.namespace: "nejcc-keybindings-hint"
     WlrLayershell.layer: WlrLayer.Overlay
@@ -96,49 +127,137 @@ Item {
     Rectangle {
       id: card
       width: parent.width
-      implicitHeight: grid.implicitHeight + Style.spacing.panelPadding * 2
+      implicitHeight: body.implicitHeight + root.pad * 2
+      y: root.opened ? root.slide : root.slide * 2
+      opacity: root.opened ? 1 : 0
       radius: Style.cornerRadius
       color: Color.menu.background
       border.color: Color.menu.border
-      border.width: 2
+      border.width: 1
 
-      Flow {
-        id: grid
-        x: Style.spacing.panelPadding
-        y: Style.spacing.panelPadding
-        width: parent.width - Style.spacing.panelPadding * 2
-        spacing: Style.spacing.sm
+      Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+      Behavior on y { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
 
-        Repeater {
-          model: root.hints
-          delegate: Row {
-            required property var modelData
-            // As many ~300px columns as fit, stretched to fill the bar.
-            readonly property int columns: Math.max(1, Math.floor((grid.width + grid.spacing) / (Style.space(300) + grid.spacing)))
-            width: Math.floor((grid.width + grid.spacing) / columns) - grid.spacing
-            spacing: Style.spacing.md
+      Column {
+        id: body
+        x: root.pad
+        y: root.pad
+        width: parent.width - root.pad * 2
+        spacing: Style.spacing.xl
 
-            Text {
-              width: Style.space(60)
-              horizontalAlignment: Text.AlignRight
-              text: modelData.key
-              color: Color.menu.selectedText
-              font.family: Style.font.menuFamily
-              font.pixelSize: Style.font.title
-              font.bold: true
-              elide: Text.ElideLeft
-            }
-            Text {
-              width: parent.width - Style.space(60) - parent.spacing
-              text: modelData.desc
-              color: Color.menu.text
-              font.family: Style.font.menuFamily
-              font.pixelSize: Style.font.title
-              elide: Text.ElideRight
+        // Header: the held key on the left, a count on the right.
+        Item {
+          width: parent.width
+          height: superCap.height
+
+          Keycap {
+            id: superCap
+            label: "SUPER"
+            filled: true
+          }
+          Text {
+            anchors.left: superCap.right
+            anchors.leftMargin: Style.spacing.lg
+            anchors.verticalCenter: parent.verticalCenter
+            text: "+ key"
+            color: root.muted
+            font.family: Style.font.menuFamily
+            font.pixelSize: Style.font.title
+          }
+          Text {
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.count + " bindings · release to close"
+            color: root.muted
+            font.family: Style.font.menuFamily
+            font.pixelSize: Style.font.caption
+          }
+        }
+
+        Rectangle {
+          width: parent.width
+          height: 1
+          color: Color.menu.border
+          opacity: 0.35
+        }
+
+        // Groups side by side; each gets width for as many columns as it wraps into.
+        Row {
+          id: columns
+          width: parent.width
+          spacing: root.pad
+          readonly property real unit: (width - spacing * (root.totalColumns - 1)) / Math.max(1, root.totalColumns)
+
+          Repeater {
+            model: root.groups
+            delegate: Column {
+              id: group
+              required property var modelData
+              width: columns.unit * modelData.columns + columns.spacing * (modelData.columns - 1)
+              spacing: Style.spacing.md
+
+              Text {
+                text: group.modelData.title.toUpperCase()
+                color: root.muted
+                font.family: Style.font.menuFamily
+                font.pixelSize: Style.font.caption
+                font.letterSpacing: 1.2
+                font.bold: true
+                bottomPadding: Style.spacing.xs
+              }
+
+              Grid {
+                flow: Grid.TopToBottom
+                rows: Math.min(root.maxRows, group.modelData.items.length)
+                rowSpacing: Style.spacing.md
+                columnSpacing: columns.spacing
+
+                Repeater {
+                  model: group.modelData.items
+                  delegate: Row {
+                    required property var modelData
+                    width: columns.unit
+                    spacing: Style.spacing.lg
+
+                    Keycap { id: cap; label: modelData.key }
+                    Text {
+                      width: parent.width - cap.width - parent.spacing
+                      anchors.verticalCenter: cap.verticalCenter
+                      text: modelData.desc
+                      color: root.text
+                      font.family: Style.font.menuFamily
+                      font.pixelSize: Style.font.title
+                      elide: Text.ElideRight
+                    }
+                  }
+                }
+              }
             }
           }
         }
       }
+    }
+  }
+
+  component Keycap: Rectangle {
+    property string label
+    property bool filled: false
+    // Shared minimum width keeps descriptions lined up; long labels grow past it.
+    width: Math.max(filled ? 0 : Style.space(54), keyText.implicitWidth + Style.spacing.lg * 2)
+    height: keyText.implicitHeight + Style.spacing.sm * 2
+    radius: Math.max(3, Style.cornerRadius / 2)
+    color: filled ? root.accent : root.keyFill
+    border.color: filled ? root.accent : root.keyEdge
+    border.width: 1
+
+    Text {
+      id: keyText
+      anchors.centerIn: parent
+      text: parent.label
+      color: parent.filled ? Color.menu.background : root.accent
+      font.family: Style.font.menuFamily
+      font.pixelSize: Style.font.title
+      font.bold: true
     }
   }
 }
