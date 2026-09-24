@@ -28,7 +28,36 @@ Item {
   readonly property int slide: Style.space(14)
   // Groups longer than this wrap into another column, so the bar stays short.
   readonly property int maxRows: 6
-  readonly property int totalColumns: groups.reduce(function(n, g) { return n + g.columns }, 0)
+  readonly property int minKeyWidth: Style.space(54)
+
+  // Columns take the width their text needs. Estimate that width at full size
+  // from character counts; if it doesn't fit (narrow or scaled screens) shrink
+  // the font to fit instead of cutting descriptions off.
+  readonly property real available: panel.width - pad * 2
+  readonly property real needed: {
+    var cw = charMetrics.advanceWidth, total = 0, cols = 0
+    groups.forEach(function(g) {
+      for (var i = 0; i < g.items.length; i += maxRows) {
+        var chunk = g.items.slice(i, i + maxRows), key = 0, desc = 0
+        chunk.forEach(function(it) { key = Math.max(key, it.key.length); desc = Math.max(desc, it.desc.length) })
+        total += Math.max(minKeyWidth, key * cw + Style.spacing.lg * 2) + Style.spacing.lg + desc * cw
+        cols++
+      }
+    })
+    return total + pad * Math.max(0, cols - 1)
+  }
+  readonly property real fit: needed > 0 ? Math.min(1, available / needed) : 1
+  // ponytail: 9px floor; below ~1250px logical width the last column can still clip.
+  readonly property int fontPx: Math.max(9, Math.floor(Style.font.title * fit))
+  // Leftover width spreads between groups so the bar fills the screen.
+  readonly property real groupGap: pad + Math.max(0, available - needed * fit) / Math.max(1, groups.length - 1)
+
+  TextMetrics {
+    id: charMetrics
+    font.family: Style.font.menuFamily
+    font.pixelSize: Style.font.title
+    text: "M"
+  }
 
   function open(payloadJson) {
     root.opened = true
@@ -94,7 +123,7 @@ Item {
     root.count = total
     root.groups = order
       .filter(function(t) { return buckets[t].length > 0 })
-      .map(function(t) { return { title: t, items: buckets[t], columns: Math.ceil(buckets[t].length / root.maxRows) } })
+      .map(function(t) { return { title: t, items: buckets[t] } })
   }
 
   Component.onCompleted: list.running = true
@@ -181,19 +210,16 @@ Item {
           opacity: 0.35
         }
 
-        // Groups side by side; each gets width for as many columns as it wraps into.
+        // Groups side by side, each as wide as its text.
         Row {
           id: columns
-          width: parent.width
-          spacing: root.pad
-          readonly property real unit: (width - spacing * (root.totalColumns - 1)) / Math.max(1, root.totalColumns)
+          spacing: root.groupGap
 
           Repeater {
             model: root.groups
             delegate: Column {
               id: group
               required property var modelData
-              width: columns.unit * modelData.columns + columns.spacing * (modelData.columns - 1)
               spacing: Style.spacing.md
 
               Text {
@@ -210,24 +236,21 @@ Item {
                 flow: Grid.TopToBottom
                 rows: Math.min(root.maxRows, group.modelData.items.length)
                 rowSpacing: Style.spacing.md
-                columnSpacing: columns.spacing
+                columnSpacing: root.pad
 
                 Repeater {
                   model: group.modelData.items
                   delegate: Row {
                     required property var modelData
-                    width: columns.unit
                     spacing: Style.spacing.lg
 
                     Keycap { id: cap; label: modelData.key }
                     Text {
-                      width: parent.width - cap.width - parent.spacing
                       anchors.verticalCenter: cap.verticalCenter
                       text: modelData.desc
                       color: root.text
                       font.family: Style.font.menuFamily
-                      font.pixelSize: Style.font.title
-                      elide: Text.ElideRight
+                      font.pixelSize: root.fontPx
                     }
                   }
                 }
@@ -243,7 +266,7 @@ Item {
     property string label
     property bool filled: false
     // Shared minimum width keeps descriptions lined up; long labels grow past it.
-    width: Math.max(filled ? 0 : Style.space(54), keyText.implicitWidth + Style.spacing.lg * 2)
+    width: Math.max(filled ? 0 : root.minKeyWidth * root.fit, keyText.implicitWidth + Style.spacing.lg * 2)
     height: keyText.implicitHeight + Style.spacing.sm * 2
     radius: Math.max(3, Style.cornerRadius / 2)
     color: filled ? root.accent : root.keyFill
@@ -256,7 +279,7 @@ Item {
       text: parent.label
       color: parent.filled ? Color.menu.background : root.accent
       font.family: Style.font.menuFamily
-      font.pixelSize: Style.font.title
+      font.pixelSize: root.fontPx
       font.bold: true
     }
   }

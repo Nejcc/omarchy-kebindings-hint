@@ -37,6 +37,8 @@ to anything you like.
 - Only plain `SUPER + key` bindings are listed, not `SUPER + SHIFT + key` and
   other combinations.
 - If a release is missed, the bar hides itself after 6 seconds.
+- On screens narrower than about 1900 logical pixels the text shrinks to fit,
+  down to 9px; below about 1250px the last column can still be cut off.
 
 ## License
 
