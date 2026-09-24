@@ -168,7 +168,13 @@ rm -f ~/.local/state/nejcc.keybindings-hint.learned.json ~/.local/state/nejcc.ke
 ```sh
 node --test tests/*.test.mjs   # unit tests for the logic, no dependencies (also run in CI)
 tests/smoke.sh                 # live test against your running Omarchy shell
+tests/stress.sh                # hard live stress test (takes over the screen; see the script)
+FUZZ_ROUNDS=200000 node --test tests/fuzz.test.mjs   # long fuzz run
 ```
+
+`tests/fuzz.test.mjs` throws tens of thousands of random and hostile inputs at
+the logic (broken `hyprctl` output, random key sequences, corrupt settings) and
+checks invariants. It runs with the unit tests.
 
 The unit tests cover parsing, grouping, suggestions and learning, including
 corrupt or hostile settings files. The smoke test opens and closes the bar,

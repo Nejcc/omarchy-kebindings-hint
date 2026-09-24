@@ -75,6 +75,12 @@ function neededWidth(groups, o) {
 
 // A learned move needs to have happened this often before it's suggested.
 var MIN_SEEN = 2
+// Limits on what's kept. A real file has a few dozen entries and stays under
+// 10 KB; anything bigger is ignored rather than parsed on the shell's UI
+// thread, where a slow parse can make Hyprland drop the shell's event stream.
+var MAX_FILE_CHARS = 1000000
+var MAX_ACTIONS = 100
+var MAX_NEXT = 100
 // The same action again within this many ms is one key firing several events.
 var DEDUPE_MS = 400
 
@@ -125,13 +131,20 @@ function record(state, name, data, items, now) {
   if (item.desc === state.lastAction && now - state.lastActionAt < DEDUPE_MS) return state
   var transitions = state.transitions
   if (state.lastAction) {
+    // Copy only what changes: the outer map (small) and the one row. Copying
+    // everything on every event is what made big files freeze the shell.
+    var old = state.transitions
+    var has = Object.prototype.hasOwnProperty
+    var sources = Object.keys(old)
+    if (!has.call(old, state.lastAction) && sources.length >= MAX_ACTIONS) return state
     transitions = {}
-    Object.keys(state.transitions).forEach(function(a) {
-      transitions[a] = {}
-      Object.keys(state.transitions[a]).forEach(function(b) { transitions[a][b] = state.transitions[a][b] })
-    })
-    var from = transitions[state.lastAction] = transitions[state.lastAction] || {}
-    from[item.desc] = (from[item.desc] || 0) + 1
+    sources.forEach(function(a) { transitions[a] = old[a] })
+    var row = {}
+    var oldRow = has.call(old, state.lastAction) ? old[state.lastAction] : {}
+    Object.keys(oldRow).forEach(function(b) { row[b] = oldRow[b] })
+    if (!has.call(row, item.desc) && Object.keys(row).length >= MAX_NEXT) return state
+    row[item.desc] = (row[item.desc] || 0) + 1
+    transitions[state.lastAction] = row
   }
   return { transitions: transitions, lastAction: item.desc, lastActionAt: now }
 }
@@ -153,19 +166,26 @@ function learnedNext(lastAction, transitions, items) {
 }
 
 // Reads a saved learned file, dropping anything malformed instead of failing.
+// Returns null when the file can't be used at all (empty, cut off, not an
+// object): the caller then keeps what it has, so a damaged or half-written
+// file never switches learning off or forgets everything.
 function loadSaved(text) {
   var saved
-  try { saved = JSON.parse(text) } catch (e) { return { learning: false, transitions: {} } }
-  if (!saved || typeof saved !== "object") return { learning: false, transitions: {} }
+  if (typeof text !== "string" || text.length > MAX_FILE_CHARS) return null
+  try { saved = JSON.parse(text) } catch (e) { return null }
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return null
   var transitions = {}
   var raw = saved.transitions && typeof saved.transitions === "object" ? saved.transitions : {}
+  var kept = 0
   Object.keys(raw).forEach(function(a) {
-    if (!safeKey(a) || !raw[a] || typeof raw[a] !== "object") return
+    if (kept >= MAX_ACTIONS || !safeKey(a) || !raw[a] || typeof raw[a] !== "object") return
+    var next = 0
     Object.keys(raw[a]).forEach(function(b) {
       var n = raw[a][b]
-      if (!safeKey(b) || typeof n !== "number" || !isFinite(n) || n <= 0) return
-      transitions[a] = transitions[a] || {}
+      if (next >= MAX_NEXT || !safeKey(b) || typeof n !== "number" || !isFinite(n) || n <= 0) return
+      if (!transitions[a]) { transitions[a] = {}; kept++ }
       transitions[a][b] = Math.floor(n)
+      next++
     })
   })
   return { learning: saved.learning === true, transitions: transitions }
@@ -191,7 +211,10 @@ function suggest(win, ws, items, learned) {
     else want.push(/^Full screen$/, /^Terminal$/, /^Close window$/)
     want.push(/^Next workspace$/)
   }
-  var out = (learned || []).slice(0, 2)
+  var out = []
+  ;(learned || []).forEach(function(it) {
+    if (out.length < 2 && it && out.indexOf(it) === -1) out.push(it)
+  })
   want.forEach(function(re) {
     if (out.length >= 4) return
     var hit = (items || []).find(function(i) { return re.test(i.desc) })

@@ -125,6 +125,7 @@ Item {
     onFileChanged: reload()
     onLoaded: {
       var saved = Logic.loadSaved(text())
+      if (!saved) return
       root.learning = saved.learning
       root.transitions = saved.transitions
     }
@@ -148,6 +149,9 @@ Item {
       return
     }
     if (!root.enabled) return root.dismiss()
+    // Re-read the learning file: picks up outside changes even if the file
+    // watch was lost (the file was deleted or unreadable for a while).
+    learnedFile.reload()
     root.opened = true
     hideTimer.restart()
     list.running = true   // refresh in the background; the cached list shows first

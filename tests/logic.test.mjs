@@ -289,12 +289,15 @@ test("loadSaved: round-trips a normal file", () => {
   assert.deepEqual(plain(L.loadSaved(JSON.stringify(saved))), { learning: true, transitions: saved.transitions })
 })
 
-test("loadSaved: corrupt or empty files fall back to defaults", () => {
-  for (const text of ["", "{", "null", "[]", "42", "\"x\"", "{\"learning\": \"yes\"}"]) {
-    const r = L.loadSaved(text)
-    assert.equal(r.learning, false, text)
-    assert.deepEqual(plain(r.transitions), {}, text)
-  }
+test("loadSaved: files that can't be used give null, so current settings are kept", () => {
+  for (const text of ["", "{", "null", "[]", "42", "\"x\"", "not json", '{"learning": true, "transitions": {"A'])
+    assert.equal(L.loadSaved(text), null, text)
+})
+
+test("loadSaved: a readable object with odd values falls back per field", () => {
+  const r = L.loadSaved('{"learning": "yes", "transitions": []}')
+  assert.equal(r.learning, false)
+  assert.deepEqual(plain(r.transitions), {})
 })
 
 test("loadSaved: drops bad counts and dangerous keys", () => {
@@ -314,6 +317,45 @@ test("loadSaved: drops bad counts and dangerous keys", () => {
   const r = L.loadSaved(text)
   assert.deepEqual(plain(r.transitions), { "Full screen": { "A": 3, "E": 2 }, "Close window": { "Terminal": 1e308 } })
   assert.equal(sandboxPolluted(), false)
+})
+
+test("loadSaved: files over 1 MB are ignored, not parsed", () => {
+  const huge = JSON.stringify({ learning: true, transitions: { A: { B: 1 } }, pad: "x".repeat(1100000) })
+  assert.equal(L.loadSaved(huge), null)
+})
+
+test("loadSaved: keeps at most 100 actions with 100 next moves each", () => {
+  const t = {}
+  for (let a = 0; a < 300; a++) { t["A" + a] = {}; for (let b = 0; b < 300; b++) t["A" + a]["B" + b] = 1 }
+  const r = L.loadSaved(JSON.stringify({ learning: true, transitions: t }))
+  assert.equal(Object.keys(r.transitions).length, L.MAX_ACTIONS)
+  for (const row of Object.values(r.transitions)) assert.equal(Object.keys(row).length, L.MAX_NEXT)
+})
+
+test("record: stays fast with the biggest table allowed", () => {
+  const t = {}
+  // One slot left free so the real actions below can still be learned.
+  for (let a = 0; a < L.MAX_ACTIONS - 3; a++) { t["A" + a] = {}; for (let b = 0; b < L.MAX_NEXT; b++) t["A" + a]["B" + b] = 1 }
+  let s = { transitions: t, lastAction: "Full screen", lastActionAt: 0 }
+  const names = ["workspace", "fullscreen", "closewindow"]
+  const t0 = performance.now()
+  for (let i = 0; i < 5000; i++) s = L.record(s, names[i % 3], "1", parsed.items, i * 500)
+  const ms = performance.now() - t0
+  // Hyprland drops a client that falls behind; each event must be cheap.
+  assert.ok(ms < 1000, `${Math.round(ms)} ms for 5000 events`)
+  assert.equal(s.transitions["Full screen"]["Switch to workspace"] > 0, true)
+})
+
+test("record: stops adding new actions at the limit but keeps counting known ones", () => {
+  const t = {}
+  for (let a = 0; a < L.MAX_ACTIONS; a++) t["A" + a] = { X: 1 }
+  let s = { transitions: t, lastAction: "Full screen", lastActionAt: 0 }
+  s = L.record(s, "workspace", "1", parsed.items, 1000)
+  assert.equal(s.transitions["Full screen"], undefined)
+  const known = { ...t, "Full screen": { "Switch to workspace": 1 } }
+  delete known.A0
+  s = L.record({ transitions: known, lastAction: "Full screen", lastActionAt: 0 }, "workspace", "1", parsed.items, 1000)
+  assert.equal(s.transitions["Full screen"]["Switch to workspace"], 2)
 })
 
 test("loadSaved: infinite and NaN counts are dropped", () => {
