@@ -44,7 +44,9 @@ and suggests keys in this order (up to four):
 | Any windows | Next workspace, if there's room left |
 
 Suggestions are matched by binding description, not by key, so they follow
-you if you rebind something. Bindings you don't have are skipped.
+you if you rebind something. Bindings you don't have are skipped. "Jump to
+window" and "Last window" aren't Omarchy defaults; they come from
+[Omarchy motions](https://github.com/Nejcc/omarchy-motions).
 
 ## Learning mode
 
@@ -85,7 +87,9 @@ Focus changes aren't counted, because a mouse click looks the same as a key.
 What it learns is kept locally in
 `~/.local/state/nejcc.keybindings-hint.learned.json` (or under
 `$XDG_STATE_HOME`) and never leaves your machine. The file holds only binding
-descriptions and counts.
+descriptions and counts. Changes made to it from outside, such as restoring a
+backup or editing it by hand, are picked up right away instead of being
+overwritten.
 
 ## Requirements
 
@@ -96,7 +100,7 @@ with Omarchy. Nothing else to install.
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/Nejcc/omarchy-kebindings-hint.git --enable
+omarchy plugin add https://github.com/Nejcc/omarchy-keybindings-hint.git --enable
 ```
 
 Then add to `~/.config/hypr/bindings.lua`:
@@ -168,8 +172,8 @@ tests/smoke.sh         # live test against your running Omarchy shell
 
 The unit tests cover parsing, grouping, suggestions and learning, including
 corrupt or hostile settings files. The smoke test opens and closes the bar,
-flips every setting, checks the 6-second auto-hide and hammers it with quick
-open/close cycles. It backs up your settings files first and puts them back
+flips every setting, checks the 6-second auto-hide, checks that an outside change
+to the learning file is kept, and hammers it with quick open/close cycles. It backs up your settings files first and puts them back
 afterwards. Expect a few on/off notifications while it runs.
 
 ## Limitations
@@ -185,6 +189,15 @@ afterwards. Expect a few on/off notifications while it runs.
   down to 9px. Below about 1250px the last column can still be cut off.
 - After editing the plugin files, run `omarchy restart shell`. The shell's
   automatic reload doesn't always pick up changes.
+- For a few seconds right after login or a shell restart, holding `SUPER` may
+  do nothing while the Omarchy shell loads its plugins. This affects every
+  shell plugin, not just this one.
+
+## See also
+
+[Omarchy motions](https://github.com/Nejcc/omarchy-motions): press `SUPER + ;`
+and every window, on any workspace, gets a letter to jump to. Adds the "Jump to
+window" and "Last window" keys that this bar suggests.
 
 ## License
 
