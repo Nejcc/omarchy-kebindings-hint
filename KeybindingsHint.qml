@@ -1,5 +1,6 @@
 import Quickshell
 import Quickshell.Io
+import Quickshell.Hyprland
 import Quickshell.Wayland
 import QtQuick
 import qs.Commons
@@ -76,10 +77,119 @@ Item {
       on ? "Hold SUPER to see your keybindings." : "Holding SUPER no longer shows the bar."])
   }
 
-  // Payload {"enabled": "toggle" | "on" | "off"} switches the hint instead of showing it.
+  // ---------------------------------------------------------------- learning
+  // Optional, off by default. Hyprland never says which key was pressed, so
+  // this watches its events, maps each to the binding that most likely caused
+  // it, and counts "after A you did B". Stored only in a local state file.
+  property bool learning: false
+  property var transitions: ({})   // { "Action A": { "Action B": count } }
+  property string lastAction: ""
+  property real lastActionAt: 0
+  readonly property string learnedPath: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state")
+    + "/nejcc.keybindings-hint.learned.json"
+  // A learned move needs to have happened this often before it's suggested.
+  readonly property int minSeen: 2
+
+  // Event name -> binding description it most likely came from.
+  // ponytail: a guess; a workspace switch by mouse or another plugin counts too.
+  function actionFor(name, data) {
+    var parts = String(data || "").split(",")
+    if (name === "workspace") return /^Switch to workspace$/
+    if (name === "fullscreen") return /^Full screen$/
+    if (name === "closewindow") return /^Close window$/
+    if (name === "activespecial") return /scratchpad/i
+    if (name === "togglegroup") return /window grouping/i
+    if (name === "changefloatingmode") return /float/i
+    if (name === "openwindow" && /^(foot|kitty|Alacritty|alacritty|com\.mitchellh\.ghostty|ghostty)$/.test(parts[2] || ""))
+      return /^Terminal$/
+    return null
+  }
+
+  function record(name, data) {
+    var re = root.actionFor(name, data)
+    if (!re) return
+    var item = root.items.find(function(i) { return re.test(i.desc) })
+    if (!item) return
+    var now = Date.now()
+    // One key can fire several events (e.g. one per monitor); count it once.
+    if (item.desc === root.lastAction && now - root.lastActionAt < 400) return
+    if (root.lastAction) {
+      var t = root.transitions
+      t[root.lastAction] = t[root.lastAction] || {}
+      t[root.lastAction][item.desc] = (t[root.lastAction][item.desc] || 0) + 1
+      root.transitions = t
+      saveTimer.restart()
+    }
+    root.lastAction = item.desc
+    root.lastActionAt = now
+  }
+
+  // Most common next moves after the last action, best first.
+  function learnedNext() {
+    if (!root.learning || !root.lastAction) return []
+    var next = root.transitions[root.lastAction] || {}
+    return Object.keys(next)
+      .filter(function(d) { return next[d] >= root.minSeen })
+      .sort(function(a, b) { return next[b] - next[a] })
+      .map(function(d) { return root.items.find(function(i) { return i.desc === d }) })
+      .filter(function(i) { return !!i })
+  }
+
+  function save() {
+    learnedFile.setText(JSON.stringify({ version: 1, learning: root.learning, transitions: root.transitions }, null, 2) + "\n")
+  }
+
+  function setLearning(mode) {
+    if (mode === "reset") {
+      root.transitions = ({})
+      root.lastAction = ""
+    } else {
+      root.learning = mode === "toggle" ? !root.learning : mode === "on"
+    }
+    root.save()
+    Quickshell.execDetached(["notify-send", "-u", "low", "Keybindings hint learning " + (mode === "reset" ? "reset" : root.learning ? "on" : "off"),
+      mode === "reset" ? "Forgot everything it had learned." : root.learning
+        ? "Suggestions will include what you usually do next." : "Suggestions come from what's on screen only."])
+  }
+
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      if (root.learning && event && event.name) root.record(String(event.name), event.data)
+    }
+  }
+
+  FileView {
+    id: learnedFile
+    path: root.learnedPath
+    atomicWrites: true
+    printErrors: false
+    onLoaded: {
+      try {
+        var saved = JSON.parse(text())
+        root.learning = saved.learning === true
+        root.transitions = saved.transitions || {}
+      } catch (e) {}
+    }
+  }
+
+  Timer {
+    id: saveTimer
+    interval: 2000
+    onTriggered: root.save()
+  }
+
+  // Payloads switch settings instead of showing the bar:
+  //   {"enabled": "toggle" | "on" | "off"}
+  //   {"learning": "toggle" | "on" | "off" | "reset"}
   function open(payloadJson) {
     var payload = {}
     try { payload = JSON.parse(payloadJson || "{}") } catch (e) {}
+    if (payload.learning !== undefined) {
+      root.setLearning(String(payload.learning))
+      if (root.shell && typeof root.shell.hide === "function") root.shell.hide((root.manifest && root.manifest.id) || "nejcc.keybindings-hint")
+      return
+    }
     if (payload.enabled !== undefined) {
       root.setEnabled(payload.enabled === "toggle" ? !root.enabled : payload.enabled === "on")
       if (root.shell && typeof root.shell.hide === "function") root.shell.hide((root.manifest && root.manifest.id) || "nejcc.keybindings-hint")
@@ -169,7 +279,8 @@ Item {
       else want.push(/^Full screen$/, /^Terminal$/, /^Close window$/)
       want.push(/^Next workspace$/)
     }
-    var out = []
+    // Learned next moves go first (up to two), then the screen rules fill in.
+    var out = root.learnedNext().slice(0, 2)
     want.forEach(function(re) {
       if (out.length >= 4) return
       var hit = root.items.find(function(i) { return re.test(i.desc) })

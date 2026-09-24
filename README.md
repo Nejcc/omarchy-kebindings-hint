@@ -9,6 +9,8 @@ in Neovim. Let go of `SUPER` and it fades away.
 - **Suggests your next key:** a Suggested row in the header shows up to four
   keys you're likely to want right now, based on what's on screen. The same
   keys are highlighted in their groups.
+- **Learns your habits (optional):** turn on learning mode and it also
+  suggests what you usually do next, based on what you just did.
 - **Grouped:** bindings are sorted into columns (Workspaces, Focus, Windows,
   Clipboard, Apps & menus, Other). Groups longer than six entries wrap into a
   second column so the bar stays short.
@@ -43,6 +45,41 @@ and suggests keys in this order (up to four):
 
 Suggestions are matched by binding description, not by key, so they follow
 you if you rebind something. Bindings you don't have are skipped.
+
+## Learning mode
+
+Off by default. When it's on, the plugin notices what you do, such as
+switching workspace, going full screen, opening a terminal or closing a window.
+It counts what you tend to do next. Once a "next move" has happened at least
+twice, it takes up to two of the four Suggested spots, ahead of the screen
+rules.
+
+```sh
+omarchy-shell shell summon nejcc.keybindings-hint '{"learning":"on"}'
+omarchy-shell shell summon nejcc.keybindings-hint '{"learning":"off"}'
+omarchy-shell shell summon nejcc.keybindings-hint '{"learning":"toggle"}'
+omarchy-shell shell summon nejcc.keybindings-hint '{"learning":"reset"}'   # forget everything learned
+```
+
+Hyprland never reports which key was pressed, so learning works from its
+events and guesses which binding caused each one:
+
+| Hyprland event | Counted as |
+|---|---|
+| Workspace changed | Switch to workspace |
+| Full screen changed | Full screen |
+| Window closed | Close window |
+| Terminal window opened (foot, kitty, Alacritty, Ghostty) | Terminal |
+| Special workspace shown | Toggle scratchpad |
+| Group toggled | Toggle window grouping |
+| Floating changed | the first binding with "float" in its description |
+
+Focus changes aren't counted, because a mouse click looks the same as a key.
+
+What it learns is kept locally in
+`~/.local/state/nejcc.keybindings-hint.learned.json` (or under
+`$XDG_STATE_HOME`) and never leaves your machine. The file holds only binding
+descriptions and counts.
 
 ## Install
 
@@ -96,9 +133,8 @@ Deleting it and restarting the shell turns the hint back on.
 
 - Only plain `SUPER + key` bindings are listed, not `SUPER + SHIFT + key` and
   other combinations.
-- Suggestions come from fixed rules about what's on screen, not from your
-  habits. Hyprland doesn't report which key was pressed, so learning from use
-  would have to guess from window events.
+- Learning mode guesses from events. A workspace switch by mouse, or a window
+  closed by the app itself, counts the same as the key would.
 - Groups are guessed from words in each description, because Omarchy's list
   has no categories. Anything unmatched lands in Other.
 - If a release is missed, the bar hides itself after 6 seconds.
