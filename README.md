@@ -87,6 +87,12 @@ What it learns is kept locally in
 `$XDG_STATE_HOME`) and never leaves your machine. The file holds only binding
 descriptions and counts.
 
+## Requirements
+
+Omarchy with its Quickshell-based shell, on Hyprland with Lua config. It calls
+`hyprctl`, `notify-send` and `omarchy menu keybindings --print`, which all ship
+with Omarchy. Nothing else to install.
+
 ## Install
 
 ```sh
@@ -139,6 +145,32 @@ omarchy-shell shell summon nejcc.keybindings-hint '{"enabled":"toggle"}'
 While the hint is off, a marker file exists at
 `~/.local/state/nejcc.keybindings-hint.disabled` (or under `$XDG_STATE_HOME`).
 Deleting it and restarting the shell turns the hint back on.
+
+## Uninstall
+
+```sh
+omarchy plugin remove nejcc.keybindings-hint
+```
+
+Then delete the lines you added to `~/.config/hypr/bindings.lua`, and remove
+the settings files if you like:
+
+```sh
+rm -f ~/.local/state/nejcc.keybindings-hint.learned.json ~/.local/state/nejcc.keybindings-hint.disabled
+```
+
+## Tests
+
+```sh
+node --test tests/     # unit tests for the logic, no dependencies (also run in CI)
+tests/smoke.sh         # live test against your running Omarchy shell
+```
+
+The unit tests cover parsing, grouping, suggestions and learning, including
+corrupt or hostile settings files. The smoke test opens and closes the bar,
+flips every setting, checks the 6-second auto-hide and hammers it with quick
+open/close cycles. It backs up your settings files first and puts them back
+afterwards. Expect a few on/off notifications while it runs.
 
 ## Limitations
 

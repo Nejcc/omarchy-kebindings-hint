@@ -4,6 +4,7 @@ import Quickshell.Hyprland
 import Quickshell.Wayland
 import QtQuick
 import qs.Commons
+import "Logic.js" as Logic
 
 // A which-key style bar: lists every SUPER + key binding along the bottom of the
 // screen, grouped by what it does. It never takes the keyboard, so pressing a
@@ -38,18 +39,10 @@ Item {
   // from character counts; if it doesn't fit (narrow or scaled screens) shrink
   // the font to fit instead of cutting descriptions off.
   readonly property real available: panel.width - pad * 2
-  readonly property real needed: {
-    var cw = charMetrics.advanceWidth, total = 0, cols = 0
-    groups.forEach(function(g) {
-      for (var i = 0; i < g.items.length; i += maxRows) {
-        var chunk = g.items.slice(i, i + maxRows), key = 0, desc = 0
-        chunk.forEach(function(it) { key = Math.max(key, it.key.length); desc = Math.max(desc, it.desc.length) })
-        total += Math.max(minKeyWidth, key * cw + Style.spacing.lg * 2) + Style.spacing.lg + desc * cw
-        cols++
-      }
-    })
-    return total + pad * Math.max(0, cols - 1)
-  }
+  readonly property real needed: Logic.neededWidth(groups, {
+    charWidth: charMetrics.advanceWidth, maxRows: maxRows, minKeyWidth: minKeyWidth,
+    keyPad: Style.spacing.lg, gap: Style.spacing.lg, columnGap: pad
+  })
   readonly property real fit: needed > 0 ? Math.min(1, available / needed) : 1
   // ponytail: 9px floor; below ~1250px logical width the last column can still clip.
   readonly property int fontPx: Math.max(9, Math.floor(Style.font.title * fit))
@@ -87,68 +80,14 @@ Item {
   property real lastActionAt: 0
   readonly property string learnedPath: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state")
     + "/nejcc.keybindings-hint.learned.json"
-  // A learned move needs to have happened this often before it's suggested.
-  readonly property int minSeen: 2
-
-  // Starter habits, written by hand (not recorded) so learning helps from the
-  // first minute. Each counts as seen minSeen times, so anything you really do
-  // more often outranks it.
-  readonly property var starterHabits: ({
-    "Terminal":               ["Terminal", "Full screen", "Switch to workspace"],
-    "Switch to workspace":    ["Switch to workspace", "Terminal", "Full screen"],
-    "Full screen":            ["Full screen", "Switch to workspace"],
-    "Close window":           ["Terminal", "Switch to workspace"],
-    "Toggle scratchpad":      ["Toggle scratchpad"],
-    "Toggle window grouping": ["Toggle window grouping"]
-  })
-
-  // Event name -> binding description it most likely came from.
-  // ponytail: a guess; a workspace switch by mouse or another plugin counts too.
-  function actionFor(name, data) {
-    var parts = String(data || "").split(",")
-    if (name === "workspace") return /^Switch to workspace$/
-    if (name === "fullscreen") return /^Full screen$/
-    if (name === "closewindow") return /^Close window$/
-    if (name === "activespecial") return /scratchpad/i
-    if (name === "togglegroup") return /window grouping/i
-    if (name === "changefloatingmode") return /float/i
-    if (name === "openwindow" && /^(foot|kitty|Alacritty|alacritty|com\.mitchellh\.ghostty|ghostty)$/.test(parts[2] || ""))
-      return /^Terminal$/
-    return null
-  }
 
   function record(name, data) {
-    var re = root.actionFor(name, data)
-    if (!re) return
-    var item = root.items.find(function(i) { return re.test(i.desc) })
-    if (!item) return
-    var now = Date.now()
-    // One key can fire several events (e.g. one per monitor); count it once.
-    if (item.desc === root.lastAction && now - root.lastActionAt < 400) return
-    if (root.lastAction) {
-      var t = root.transitions
-      t[root.lastAction] = t[root.lastAction] || {}
-      t[root.lastAction][item.desc] = (t[root.lastAction][item.desc] || 0) + 1
-      root.transitions = t
-      saveTimer.restart()
-    }
-    root.lastAction = item.desc
-    root.lastActionAt = now
-  }
-
-  // Most common next moves after the last action, best first.
-  function learnedNext() {
-    if (!root.learning || !root.lastAction) return []
-    var next = {}
-    // Tiny offsets keep the starter list's order when counts tie.
-    ;(root.starterHabits[root.lastAction] || []).forEach(function(d, i) { next[d] = root.minSeen + (9 - i) / 100 })
-    var mine = root.transitions[root.lastAction] || {}
-    Object.keys(mine).forEach(function(d) { next[d] = (next[d] || 0) + mine[d] })
-    return Object.keys(next)
-      .filter(function(d) { return next[d] >= root.minSeen })
-      .sort(function(a, b) { return next[b] - next[a] })
-      .map(function(d) { return root.items.find(function(i) { return i.desc === d }) })
-      .filter(function(i) { return !!i })
+    var next = Logic.record({ transitions: root.transitions, lastAction: root.lastAction, lastActionAt: root.lastActionAt },
+      name, data, root.items, Date.now())
+    if (next.transitions !== root.transitions) saveTimer.restart()
+    root.transitions = next.transitions
+    root.lastAction = next.lastAction
+    root.lastActionAt = next.lastActionAt
   }
 
   function save() {
@@ -175,17 +114,19 @@ Item {
     }
   }
 
+  // Watched, so an outside change (a restore, a hand edit, a sync) is picked up
+  // instead of being overwritten by the next save.
   FileView {
     id: learnedFile
     path: root.learnedPath
     atomicWrites: true
+    watchChanges: true
     printErrors: false
+    onFileChanged: reload()
     onLoaded: {
-      try {
-        var saved = JSON.parse(text())
-        root.learning = saved.learning === true
-        root.transitions = saved.transitions || {}
-      } catch (e) {}
+      var saved = Logic.loadSaved(text())
+      root.learning = saved.learning
+      root.transitions = saved.transitions
     }
   }
 
@@ -199,15 +140,10 @@ Item {
   //   {"enabled": "toggle" | "on" | "off"}
   //   {"learning": "toggle" | "on" | "off" | "reset"}
   function open(payloadJson) {
-    var payload = {}
-    try { payload = JSON.parse(payloadJson || "{}") } catch (e) {}
-    if (payload.learning !== undefined) {
-      root.setLearning(String(payload.learning))
-      if (root.shell && typeof root.shell.hide === "function") root.shell.hide((root.manifest && root.manifest.id) || "nejcc.keybindings-hint")
-      return
-    }
-    if (payload.enabled !== undefined) {
-      root.setEnabled(payload.enabled === "toggle" ? !root.enabled : payload.enabled === "on")
+    var payload = Logic.readPayload(payloadJson)
+    if (payload.kind !== "show") {
+      if (payload.kind === "learning") root.setLearning(payload.value)
+      if (payload.kind === "enabled") root.setEnabled(payload.value === "toggle" ? !root.enabled : payload.value === "on")
       if (root.shell && typeof root.shell.hide === "function") root.shell.hide((root.manifest && root.manifest.id) || "nejcc.keybindings-hint")
       return
     }
@@ -233,76 +169,16 @@ Item {
     else root.open("{}")
   }
 
-  // Short labels, the way the keycaps read.
-  readonly property var symbols: ({
-    APOSTROPHE: "'", SEMICOLON: ";", COMMA: ",", PERIOD: ".", SLASH: "/", BACKSLASH: "\\",
-    MINUS: "-", EQUAL: "=", GRAVE: "`", BACKSPACE: "⌫", RETURN: "⏎", ESCAPE: "Esc",
-    SPACE: "Space", TAB: "Tab", PRINT: "PrtSc", Home: "Home",
-    LEFT: "←", RIGHT: "→", UP: "↑", DOWN: "↓"
-  })
-
-  function label(key) {
-    return key.split(" / ").map(function(k) { return root.symbols[k] || k }).join(" ")
-  }
-
-  // First match wins; anything unmatched lands in "Other".
-  // ponytail: grouped by words in the description; Omarchy's list has no categories.
-  readonly property var groupRules: [
-    { title: "Workspaces",   test: /workspace|scratchpad/i },
-    { title: "Focus",        test: /^focus|last window|jump to window/i },
-    { title: "Windows",      test: /window|full ?screen|split|group|float|pseudo|expand|shrink/i },
-    { title: "Clipboard",    test: /copy|paste|cut\b|select all/i },
-    { title: "Apps & menus", test: /menu|terminal|keybindings|browser|file manager|picker|launch/i }
-  ]
-
-  // Parses `omarchy menu keybindings --print` lines: "SUPER + J    → Toggle window split".
   function parse(text) {
-    var buckets = {}, order = root.groupRules.map(function(r) { return r.title }).concat(["Other"])
-    order.forEach(function(t) { buckets[t] = [] })
-    var workspaces = false, total = 0
-    text.split("\n").forEach(function(line) {
-      var m = line.match(/^SUPER \+ (.+?)\s+→\s+(.+)$/)
-      if (!m || /MOUSE|mouse_/.test(m[1])) return
-      var item = { key: root.label(m[1].replace(/SUPER \+ /g, "")), desc: m[2] }
-      if (/^[0-9]$/.test(m[1]) && /workspace/i.test(m[2])) {
-        if (workspaces) return
-        workspaces = true
-        item = { key: "1–0", desc: "Switch to workspace" }
-      }
-      var rule = root.groupRules.find(function(r) { return r.test.test(item.desc) })
-      buckets[rule ? rule.title : "Other"].push(item)
-      total++
-    })
-    root.count = total
-    root.items = order.reduce(function(all, t) { return all.concat(buckets[t]) }, [])
-    root.groups = order
-      .filter(function(t) { return buckets[t].length > 0 })
-      .map(function(t) { return { title: t, items: buckets[t] } })
+    var r = Logic.parse(text)
+    root.count = r.count
+    root.items = r.items
+    root.groups = r.groups
   }
 
-  // Suggests next keys from what's on screen. Rules are matched against binding
-  // descriptions, so rebinding a key keeps its suggestion. First rules win.
   function suggest(win, ws) {
-    var n = ws.windows || 0
-    var want = []
-    if (n === 0) want = [/^Terminal$/, /^Omarchy menu$/, /^Switch to workspace$/, /^Keybindings$/]
-    else {
-      if (win.fullscreen > 0) want.push(/^Full screen$/)
-      if (win.grouped && win.grouped.length > 0) want.push(/window grouping/)
-      if (win.floating) want.push(/^Pop window out/)
-      if (n >= 3) want.push(/^Jump to window$/, /^Last window$/, /^Toggle window split$/)
-      else if (n === 2) want.push(/^Last window$/, /^Toggle window split$/, /^Full screen$/)
-      else want.push(/^Full screen$/, /^Terminal$/, /^Close window$/)
-      want.push(/^Next workspace$/)
-    }
-    // Learned next moves go first (up to two), then the screen rules fill in.
-    var out = root.learnedNext().slice(0, 2)
-    want.forEach(function(re) {
-      if (out.length >= 4) return
-      var hit = root.items.find(function(i) { return re.test(i.desc) })
-      if (hit && out.indexOf(hit) === -1) out.push(hit)
-    })
-    root.suggested = out
+    root.suggested = Logic.suggest(win, ws, root.items,
+      root.learning ? Logic.learnedNext(root.lastAction, root.transitions, root.items) : [])
   }
 
   Process {
