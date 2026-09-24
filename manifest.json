@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "nejcc.keybindings-hint",
   "name": "Keybindings hint",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "author": "Nejcc",
   "license": "MIT",
   "description": "Hold SUPER to see what every SUPER + key does, in a bar along the bottom, like which-key in Neovim",

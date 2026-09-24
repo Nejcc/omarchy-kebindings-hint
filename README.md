@@ -61,6 +61,12 @@ omarchy-shell shell summon nejcc.keybindings-hint '{"learning":"toggle"}'
 omarchy-shell shell summon nejcc.keybindings-hint '{"learning":"reset"}'   # forget everything learned
 ```
 
+It starts with a few **starter habits**, written by hand rather than recorded,
+so it's useful from the first minute. For example, after opening a terminal
+it suggests another terminal, full screen, or switching workspace. Each starter
+habit counts as seen twice, so anything you really do three or more times
+outranks it.
+
 Hyprland never reports which key was pressed, so learning works from its
 events and guesses which binding caused each one:
 

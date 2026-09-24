@@ -90,6 +90,18 @@ Item {
   // A learned move needs to have happened this often before it's suggested.
   readonly property int minSeen: 2
 
+  // Starter habits, written by hand (not recorded) so learning helps from the
+  // first minute. Each counts as seen minSeen times, so anything you really do
+  // more often outranks it.
+  readonly property var starterHabits: ({
+    "Terminal":               ["Terminal", "Full screen", "Switch to workspace"],
+    "Switch to workspace":    ["Switch to workspace", "Terminal", "Full screen"],
+    "Full screen":            ["Full screen", "Switch to workspace"],
+    "Close window":           ["Terminal", "Switch to workspace"],
+    "Toggle scratchpad":      ["Toggle scratchpad"],
+    "Toggle window grouping": ["Toggle window grouping"]
+  })
+
   // Event name -> binding description it most likely came from.
   // ponytail: a guess; a workspace switch by mouse or another plugin counts too.
   function actionFor(name, data) {
@@ -127,7 +139,11 @@ Item {
   // Most common next moves after the last action, best first.
   function learnedNext() {
     if (!root.learning || !root.lastAction) return []
-    var next = root.transitions[root.lastAction] || {}
+    var next = {}
+    // Tiny offsets keep the starter list's order when counts tie.
+    ;(root.starterHabits[root.lastAction] || []).forEach(function(d, i) { next[d] = root.minSeen + (9 - i) / 100 })
+    var mine = root.transitions[root.lastAction] || {}
+    Object.keys(mine).forEach(function(d) { next[d] = (next[d] || 0) + mine[d] })
     return Object.keys(next)
       .filter(function(d) { return next[d] >= root.minSeen })
       .sort(function(a, b) { return next[b] - next[a] })
