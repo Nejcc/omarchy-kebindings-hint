@@ -59,7 +59,30 @@ Item {
     text: "M"
   }
 
+  // Turned off, holding SUPER does nothing. Remembered across restarts by the
+  // presence of a marker file.
+  property bool enabled: true
+  readonly property string disabledFile: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state")
+    + "/nejcc.keybindings-hint.disabled"
+
+  function setEnabled(on) {
+    root.enabled = on
+    if (!on) root.dismiss()
+    Quickshell.execDetached(["sh", "-c", on ? 'rm -f "$1"' : 'mkdir -p "$(dirname "$1")" && touch "$1"', "sh", root.disabledFile])
+    Quickshell.execDetached(["notify-send", "-u", "low", "Keybindings hint " + (on ? "on" : "off"),
+      on ? "Hold SUPER to see your keybindings." : "Holding SUPER no longer shows the bar."])
+  }
+
+  // Payload {"enabled": "toggle" | "on" | "off"} switches the hint instead of showing it.
   function open(payloadJson) {
+    var payload = {}
+    try { payload = JSON.parse(payloadJson || "{}") } catch (e) {}
+    if (payload.enabled !== undefined) {
+      root.setEnabled(payload.enabled === "toggle" ? !root.enabled : payload.enabled === "on")
+      if (root.shell && typeof root.shell.hide === "function") root.shell.hide((root.manifest && root.manifest.id) || "nejcc.keybindings-hint")
+      return
+    }
+    if (!root.enabled) return root.dismiss()
     root.opened = true
     hideTimer.restart()
     list.running = true   // refresh in the background; the cached list shows first
@@ -126,7 +149,16 @@ Item {
       .map(function(t) { return { title: t, items: buckets[t] } })
   }
 
-  Component.onCompleted: list.running = true
+  Component.onCompleted: {
+    list.running = true
+    enabledCheck.running = true
+  }
+
+  Process {
+    id: enabledCheck
+    command: ["test", "-e", root.disabledFile]
+    onExited: function(code) { root.enabled = code !== 0 }
+  }
 
   Process {
     id: list
