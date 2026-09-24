@@ -15,6 +15,9 @@ Item {
   property bool opened: false
   property var groups: []   // [{ title, items: [{ key, desc }] }]
   property int count: 0
+  property var items: []       // every parsed binding, flat
+  property var suggested: []   // up to 4 items worth pressing next, from the screen's state
+  readonly property var suggestedDescs: suggested.map(function(i) { return i.desc })
 
   // Safety net: a release bind can be missed, so the bar never stays up for long.
   readonly property int autoHideMs: 6000
@@ -86,6 +89,7 @@ Item {
     root.opened = true
     hideTimer.restart()
     list.running = true   // refresh in the background; the cached list shows first
+    activeWindow.running = true
   }
 
   function close() {
@@ -144,9 +148,53 @@ Item {
       total++
     })
     root.count = total
+    root.items = order.reduce(function(all, t) { return all.concat(buckets[t]) }, [])
     root.groups = order
       .filter(function(t) { return buckets[t].length > 0 })
       .map(function(t) { return { title: t, items: buckets[t] } })
+  }
+
+  // Suggests next keys from what's on screen. Rules are matched against binding
+  // descriptions, so rebinding a key keeps its suggestion. First rules win.
+  function suggest(win, ws) {
+    var n = ws.windows || 0
+    var want = []
+    if (n === 0) want = [/^Terminal$/, /^Omarchy menu$/, /^Switch to workspace$/, /^Keybindings$/]
+    else {
+      if (win.fullscreen > 0) want.push(/^Full screen$/)
+      if (win.grouped && win.grouped.length > 0) want.push(/window grouping/)
+      if (win.floating) want.push(/^Pop window out/)
+      if (n >= 3) want.push(/^Jump to window$/, /^Last window$/, /^Toggle window split$/)
+      else if (n === 2) want.push(/^Last window$/, /^Toggle window split$/, /^Full screen$/)
+      else want.push(/^Full screen$/, /^Terminal$/, /^Close window$/)
+      want.push(/^Next workspace$/)
+    }
+    var out = []
+    want.forEach(function(re) {
+      if (out.length >= 4) return
+      var hit = root.items.find(function(i) { return re.test(i.desc) })
+      if (hit && out.indexOf(hit) === -1) out.push(hit)
+    })
+    root.suggested = out
+  }
+
+  Process {
+    id: activeWindow
+    command: ["hyprctl", "activewindow", "-j"]
+    stdout: StdioCollector { id: activeWindowOut; onStreamFinished: activeWorkspace.running = true }
+  }
+
+  Process {
+    id: activeWorkspace
+    command: ["hyprctl", "activeworkspace", "-j"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var win = {}, ws = {}
+        try { win = JSON.parse(activeWindowOut.text) } catch (e) {}
+        try { ws = JSON.parse(text) } catch (e) {}
+        root.suggest(win, ws)
+      }
+    }
   }
 
   Component.onCompleted: {
@@ -215,8 +263,10 @@ Item {
             id: superCap
             label: "SUPER"
             filled: true
+            minWidth: 0
           }
           Text {
+            id: plusKey
             anchors.left: superCap.right
             anchors.leftMargin: Style.spacing.lg
             anchors.verticalCenter: parent.verticalCenter
@@ -224,6 +274,41 @@ Item {
             color: root.muted
             font.family: Style.font.menuFamily
             font.pixelSize: Style.font.title
+          }
+
+          // What you'll most likely press next, given what's on screen.
+          Row {
+            anchors.left: plusKey.right
+            anchors.leftMargin: root.pad * 2
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: root.pad
+            visible: root.suggested.length > 0
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              text: "SUGGESTED"
+              color: root.muted
+              font.family: Style.font.menuFamily
+              font.pixelSize: Style.font.caption
+              font.letterSpacing: 1.2
+              font.bold: true
+            }
+
+            Repeater {
+              model: root.suggested
+              delegate: Row {
+                required property var modelData
+                spacing: Style.spacing.lg
+                Keycap { id: hotCap; label: modelData.key; filled: true; minWidth: 0 }
+                Text {
+                  anchors.verticalCenter: hotCap.verticalCenter
+                  text: modelData.desc
+                  color: root.text
+                  font.family: Style.font.menuFamily
+                  font.pixelSize: root.fontPx
+                }
+              }
+            }
           }
           Text {
             anchors.right: parent.right
@@ -276,7 +361,7 @@ Item {
                     required property var modelData
                     spacing: Style.spacing.lg
 
-                    Keycap { id: cap; label: modelData.key }
+                    Keycap { id: cap; label: modelData.key; filled: root.suggestedDescs.indexOf(modelData.desc) !== -1 }
                     Text {
                       anchors.verticalCenter: cap.verticalCenter
                       text: modelData.desc
@@ -298,7 +383,8 @@ Item {
     property string label
     property bool filled: false
     // Shared minimum width keeps descriptions lined up; long labels grow past it.
-    width: Math.max(filled ? 0 : root.minKeyWidth * root.fit, keyText.implicitWidth + Style.spacing.lg * 2)
+    property real minWidth: root.minKeyWidth * root.fit
+    width: Math.max(minWidth, keyText.implicitWidth + Style.spacing.lg * 2)
     height: keyText.implicitHeight + Style.spacing.sm * 2
     radius: Math.max(3, Style.cornerRadius / 2)
     color: filled ? root.accent : root.keyFill

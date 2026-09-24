@@ -6,6 +6,9 @@ in Neovim. Let go of `SUPER` and it fades away.
 
 ![The keybindings bar](preview.png)
 
+- **Suggests your next key:** a Suggested row in the header shows up to four
+  keys you're likely to want right now, based on what's on screen. The same
+  keys are highlighted in their groups.
 - **Grouped:** bindings are sorted into columns (Workspaces, Focus, Windows,
   Clipboard, Apps & menus, Other). Groups longer than six entries wrap into a
   second column so the bar stays short.
@@ -21,6 +24,25 @@ in Neovim. Let go of `SUPER` and it fades away.
 - **Themed:** colors and font come from the current Omarchy theme.
 - **On/off switch:** turn the hint off when you don't want it. The setting is
   remembered across restarts.
+
+## Suggestions
+
+When the bar opens it looks at the focused window and the current workspace,
+and suggests keys in this order (up to four):
+
+| On screen | Suggested |
+|---|---|
+| Empty workspace | Terminal, Omarchy menu, Switch to workspace, Keybindings |
+| Window is full screen | Full screen (to leave it) |
+| Window is in a group | Toggle window grouping |
+| Window is floating | Pop window out (to tile it back) |
+| 3 or more windows | Jump to window, Last window, Toggle window split |
+| 2 windows | Last window, Toggle window split, Full screen |
+| 1 window | Full screen, Terminal, Close window |
+| Any windows | Next workspace, if there's room left |
+
+Suggestions are matched by binding description, not by key, so they follow
+you if you rebind something. Bindings you don't have are skipped.
 
 ## Install
 
@@ -74,6 +96,9 @@ Deleting it and restarting the shell turns the hint back on.
 
 - Only plain `SUPER + key` bindings are listed, not `SUPER + SHIFT + key` and
   other combinations.
+- Suggestions come from fixed rules about what's on screen, not from your
+  habits. Hyprland doesn't report which key was pressed, so learning from use
+  would have to guess from window events.
 - Groups are guessed from words in each description, because Omarchy's list
   has no categories. Anything unmatched lands in Other.
 - If a release is missed, the bar hides itself after 6 seconds.
