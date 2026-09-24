@@ -97,14 +97,18 @@ hl.bind("SUPER_L", hl.dsp.exec_cmd("omarchy-shell shell hide nejcc.keybindings-h
 
 -- Turn the hint on or off.
 o.bind("SUPER + SHIFT + K", "Toggle keybindings hint", "omarchy-shell shell summon nejcc.keybindings-hint '{\"enabled\":\"toggle\"}'")
+
+-- Turn learning mode on or off.
+o.bind("SUPER + CTRL + SHIFT + K", "Toggle keybindings hint learning", "omarchy-shell shell summon nejcc.keybindings-hint '{\"learning\":\"toggle\"}'")
 ```
 
 The long-press binding has to be on bare `SUPER_L` with `ignore_mods = true`.
 Bound as `SUPER + SUPER_L` it never fires, because `SUPER` doesn't count as
 held yet at the moment the key goes down.
 
-`SUPER + SHIFT + K` is free in the default Omarchy bindings, next to Omarchy's
-own `SUPER + K` keybindings menu. Pick another key if you prefer.
+`SUPER + SHIFT + K` and `SUPER + CTRL + SHIFT + K` are free in the default
+Omarchy bindings, next to Omarchy's own `SUPER + K` keybindings menu. Pick
+other keys if you prefer.
 
 ## Usage
 
@@ -112,6 +116,7 @@ own `SUPER + K` keybindings menu. Pick another key if you prefer.
 |---|---|
 | hold `SUPER` | Show the bar; release to hide it |
 | `SUPER + SHIFT + K` | Turn the hint on or off (a notification says which) |
+| `SUPER + CTRL + SHIFT + K` | Turn learning mode on or off (a notification says which) |
 
 ### Commands
 
